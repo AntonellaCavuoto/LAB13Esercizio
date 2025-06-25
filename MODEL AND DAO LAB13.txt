@@ -1,0 +1,182 @@
+MODEL AND DAO LAB13 
+MODEL 
+import copy
+
+from database.DAO import DAO
+import networkx as nx
+
+
+class Model:
+    def __init__(self):
+        self._grafo = nx.DiGraph()
+        self._allNodi = []
+        self._idMap ={}
+        self._dreamTeam = []
+        self._totale = 0
+        self._idMapVittorie = {}
+
+
+    def getAnni(self):
+        return DAO.getAnni()
+
+    def buildGraph(self, anno):
+        self._allNodi= DAO.getNodes(anno)
+        self._grafo.add_nodes_from(self._allNodi)
+        self._idMap = {n.driverId: n for n in self._allNodi}
+        self._allEdges = DAO.getEdges(self._idMap, anno, anno)
+        for edge in self._allEdges:
+            self._grafo.add_edge(edge.vincitore, edge.perdente, weight = edge.numGare)
+
+        return len(self._allNodi), len(self._allEdges), self.getVincitore()
+
+    def getVincitore(self):
+        differenzaMax = 0
+        pilota = None
+
+        for nodo in self._allNodi:
+            peso_uscenti = 0
+            peso_entranti = 0
+            for successor in self._grafo.successors(nodo):
+                peso_uscenti += self._grafo[nodo][successor]["weight"]
+            for predecessor in self._grafo.predecessors(nodo):
+                peso_entranti += self._grafo[predecessor][nodo]["weight"]
+            differenza = peso_uscenti-peso_entranti
+            self._idMapVittorie[nodo] = differenza
+
+            if differenza > differenzaMax:
+                differenzaMax = differenza
+                pilota = nodo
+        return differenzaMax, pilota
+
+    def getDreamTeam(self, k):
+        self._dreamTeam=[]
+        parziale = []
+        self._totale = 0
+
+        for nodo in self._allNodi:
+            parziale.append(nodo)
+            self._ricorsione(parziale, self._idMapVittorie[nodo], k)
+            parziale.pop()
+
+        return self._dreamTeam, self._totale
+
+    def _ricorsione(self, parziale, totale, k):
+        if len(parziale) == k:
+            if self.getScore(parziale) > self._totale:
+                self._dreamTeam = copy.deepcopy(parziale)
+                self._totale = self.getScore(parziale)
+                return self._dreamTeam, self._totale
+        else:
+            for nodo in self._allNodi:
+                if nodo not in parziale:
+                    #differenza = self.getDifferenza(nodo)
+                    #if totale + differenza > totale:
+                    parziale.append(nodo)
+                    #totale = totale + differenza
+                    self._ricorsione(parziale, totale, k)
+                    parziale.pop()
+
+    def getScore(self, parziale):
+        tot = 0
+        for i in parziale:
+            tot += self._idMapVittorie[i]
+        # print(tot)
+        return tot
+
+
+
+
+    # def getDifferenza(self, nodo):
+    #     peso_uscenti = 0
+    #     peso_entranti = 0
+    #     for successor in self._grafo.successors(nodo):
+    #         peso_uscenti += self._grafo[nodo][successor]["weight"]
+    #     for predecessor in self._grafo.predecessors(nodo):
+    #         peso_entranti += self._grafo[predecessor][nodo]["weight"]
+    #     differenza = peso_uscenti-peso_entranti
+    #
+    #
+    #     return differenza
+
+
+
+
+DAO 
+from database.DB_connect import DBConnect
+from model.pilota import Pilota
+from model.vittoria import Vittoria
+
+
+class DAO():
+    @staticmethod
+    def getAnni():
+        conn = DBConnect.get_connection()
+        result = []
+        cursor = conn.cursor(dictionary = True)
+        query = """select s.`year` 
+                    from seasons s """
+
+        cursor.execute(query)
+
+        for row in cursor:
+            result.append(row["year"])
+
+        cursor.close()
+        conn.close()
+
+        return result
+
+    @staticmethod
+    def getNodes(anno):
+        conn = DBConnect.get_connection()
+        result = []
+        cursor = conn.cursor(dictionary=True)
+        query = """select distinct d.* 
+                    from results r, races r2, drivers d  
+                    where r.raceId = r2.raceId and 
+                    r2.`year` = %s 
+                    and r.driverId = d.driverId  and
+                    r.`position` is not null """
+
+        cursor.execute(query, (anno,))
+
+        for row in cursor:
+            result.append(Pilota(**row))
+
+        cursor.close()
+        conn.close()
+
+        return result
+
+    @staticmethod
+    def getEdges(idMap, anno1, anno2):
+        conn = DBConnect.get_connection()
+        result = []
+        cursor = conn.cursor(dictionary=True)
+        query = """select   t1.driverId as vincitore, t2.driverId as perdente, count(*) as numGare
+                    from (select distinct d.driverId, r.`position`, r.raceId    
+                    from results r, races r2, drivers d  
+                    where r.raceId = r2.raceId and 
+                    r2.`year` = %s and 
+                    r.driverId = d.driverId  and
+                    r.`position` is not null) t1, (select distinct d.driverId, r.`position`, r.raceId    
+                    from results r, races r2, drivers d  
+                    where r.raceId = r2.raceId and 
+                    r2.`year` = %s and 
+                    r.driverId = d.driverId  and
+                    r.`position` is not null) t2
+                    where t1.driverId != t2.driverId and 
+                    t1.raceId = t2.raceId and 
+                    t1.`position` < t2.`position`
+                    group by t1.driverId, t2.driverId"""
+
+        cursor.execute(query, (anno1, anno2))
+
+        for row in cursor:
+            if row["vincitore"] in idMap and row["perdente"] in idMap:
+                result.append(Vittoria(idMap[row["vincitore"]], idMap[row["perdente"]], row["numGare"]))
+
+        cursor.close()
+        conn.close()
+
+        return result
