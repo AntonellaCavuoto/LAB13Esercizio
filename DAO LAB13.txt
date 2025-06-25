@@ -1,0 +1,72 @@
+DAO LAB13
+from database.DB_connect import DBConnect
+from model.pilota import Pilota
+
+
+class DAO():
+    @staticmethod
+    def getSeasons():
+        cnx = DBConnect.get_connection()
+        result = []
+        if cnx is None:
+            print("Connessione fallita")
+        else:
+            cursor = cnx.cursor(dictionary=True)
+            query = """select distinct s.`year` as year 
+                        from seasons s"""
+            cursor.execute(query)
+
+            for row in cursor:
+                result.append(row["year"])
+
+            cursor.close()
+            cnx.close()
+        return result
+
+    @staticmethod
+    def getNodes(anno):
+        cnx = DBConnect.get_connection()
+        result = []
+        if cnx is None:
+            print("Connessione fallita")
+        else:
+            cursor = cnx.cursor(dictionary=True)
+            query = """select distinct d.*
+                        from results r, races r2, drivers d 
+                        where r2.`year` = %s and r.raceId = r2.raceId and r.`position` is not null 
+                        and r.driverId = d.driverId"""
+            cursor.execute(query, (anno,))
+
+            for row in cursor:
+                result.append(Pilota(**row))
+
+            cursor.close()
+            cnx.close()
+        return result
+
+    @staticmethod
+    def getEdges(anno1, anno2, idMap):
+        cnx = DBConnect.get_connection()
+        result = []
+        if cnx is None:
+            print("Connessione fallita")
+        else:
+            cursor = cnx.cursor(dictionary=True)
+            query = """select r.driverId as d1, r2.driverId as d2, count(*) as peso
+                        from (select distinct r.*
+                        from results r, races r2, drivers d 
+                        where r2.`year` = %s and r.raceId = r2.raceId and r.`position` is not null and r.driverId = d.driverId ) r,
+                        (select distinct r.*
+                        from results r, races r2, drivers d 
+                        where r2.`year` = %s and r.raceId = r2.raceId and r.`position` is not null and r.driverId = d.driverId ) r2
+                        where r.raceId = r2.raceId and r.driverId != r2.driverId and r.`position`  < r2.`position` 
+                        group by r.driverId, r2.driverId
+                        """
+            cursor.execute(query, (anno1, anno2))
+
+            for row in cursor:
+                result.append((idMap[row["d1"]], idMap[row["d2"]], row["peso"]))
+
+            cursor.close()
+            cnx.close()
+        return result

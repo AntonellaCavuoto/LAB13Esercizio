@@ -1,0 +1,84 @@
+MODEL LAB13
+import copy
+
+from database.DAO import DAO
+import networkx as nx
+
+
+class Model:
+    def __init__(self):
+        self._bestScore = 0
+        self._bestTeam = []
+        self._graph = nx.DiGraph()
+        self._idMap = {}
+
+    def getSeasons(self):
+        return DAO.getSeasons()
+
+    def buildGraph(self, anno):
+        nodes = DAO.getNodes(anno)
+        for n in nodes:
+            self._idMap[n.driverId] = n
+
+        self._graph.add_nodes_from(nodes)
+
+        edges = DAO.getEdges(anno, anno, self._idMap)
+        for e in edges:
+            self._graph.add_edge(e[0], e[1], weight=e[2])
+
+        return self._graph.number_of_nodes(), self._graph.number_of_edges()
+
+    def getBestPilot(self):
+        best = 0
+        results = []
+        for n in self._graph.nodes:
+            totOut=0
+            totIn=0
+            outEdge = self._graph.out_edges(n)
+            inEdge = self._graph.in_edges(n)
+
+            for e in outEdge:
+                totOut += self._graph[e[0]][e[1]]["weight"]
+            for i in inEdge:
+                totIn += self._graph[i[0]][i[1]]["weight"]
+            tot = totOut - totIn
+            results.append((n, tot))
+
+        resultsSorted = sorted(results, key=lambda x: x[1], reverse=True)
+        return resultsSorted[0]
+
+    def bestTeam(self, k):
+        self._bestTeam = []
+        self._bestScore = 0
+        parziale = []
+
+        for n in self._graph.nodes:
+            parziale.append(n)
+            self._ricorsione(k, parziale)
+            parziale.pop()
+
+        return self._bestTeam, self._bestScore
+
+    def _ricorsione(self, k, parziale):
+
+        if self.getSconfitte(parziale[:-1]) > self.getSconfitte(parziale) and len(parziale) == k:
+            self._bestScore= self.getSconfitte(parziale)
+            self._bestTeam= copy.deepcopy(parziale)
+            return
+
+        else:
+            for n in self._graph.nodes:
+                if n not in parziale:
+                    parziale.append(n)
+                    self._ricorsione(k, parziale)
+                    parziale.pop()
+
+    def getSconfitte(self, parziale):
+        totIn = 0
+        for n in parziale:
+            inEdge = self._graph.in_edges(n)
+            for i in inEdge:
+                totIn += self._graph[i[0]][i[1]]["weight"]
+
+        return totIn
+
